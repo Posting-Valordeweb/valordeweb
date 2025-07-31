@@ -5,20 +5,40 @@ $(document).ready(function(){
         <?php echo $id ?>:<?php echo $thumbnail ?>,
         <?php endforeach; ?>
     };
+    // Asumiendo que dynamicThumbnail() ya maneja la lógica de carga asíncrona.
+    // Si necesitas que cargue específicamente desde /thumbs/, tendríamos que revisar dynamicThumbnail.js
     dynamicThumbnail(urls);
 });
 </script>
 
 <div class="row">
 <?php
-	foreach ($data as $website):
-		$url = Yii::app()->controller->createUrl("website/show", array("domain"=>$website->domain));
+    foreach ($data as $website):
+        $url = Yii::app()->controller->createUrl("website/show", array("domain"=>$website->domain));
+
+        // --- INICIO DE LA MODIFICACIÓN ---
+        // Construye el nombre de archivo de la miniatura esperado
+        // Asegúrate de que Helper::cropDomain() elimine http://, https://, www.
+        $thumbnailFileName = Helper::cropDomain($website->domain) . '.png';
+        $thumbnailPath = '/thumbs/' . $thumbnailFileName; // Ruta relativa al base URL
+
+        // Ruta completa en el servidor
+        $serverPathToFile = $_SERVER['DOCUMENT_ROOT'] . $thumbnailPath;
+
+        // Determina la URL de la imagen a mostrar
+        $imageUrl = Yii::app()->baseUrl . '/images/not-available.png'; // Por defecto, la imagen "no disponible"
+
+        if (file_exists($serverPathToFile)) {
+            // Si la miniatura existe en el servidor, usa su URL
+            $imageUrl = Yii::app()->baseUrl . $thumbnailPath;
+        }
+        // --- FIN DE LA MODIFICACIÓN ---
 ?>
     <div class="col col-12 col-md-6 col-lg-4 mb-4">
         <div class="card mb-3">
             <h3 class="card-header"><?php echo Helper::cropDomain($website->idn) ?></h3>
             <a href="<?php echo $url ?>">
-                <img class="card-img-top" id="thumb_<?php echo $website->id ?>" src="<?php echo Yii::app() -> getBaseUrl(true) ?>/images/loader.gif" alt="<?php echo $website->idn ?>" />
+                <img class="card-img-top" id="thumb_<?php echo $website->id ?>" src="<?php echo $imageUrl; ?>" alt="Miniatura de <?php echo Helper::cropDomain($website->idn) ?>">
             </a>
             <div class="card-body">
                 <p class="card-text">
@@ -40,10 +60,10 @@ $(document).ready(function(){
                     )) ?></span>
                 </li>
                 <li class="list-group-item">
-                    Facebook: <span class="badge badge-success card-badge"><?php echo Helper::f($website->social->facebook_total_count) ?></span>
+                    Facebook: <span class="badge badge-success card-badge"><?php echo Helper::f($website->social->facebook_shares) ?></span>
                 </li>
                 <li class="list-group-item">
-                    <?php echo Yii::t("website", "Norton") ?>:<img src="<?php echo Yii::app() -> getBaseUrl(true) ?>/images/<?php echo $website->antivirus->avg ?>.png" alt="<?php echo $website->antivirus->avg ?>" class="badge-icon">
+                    <?php echo Yii::t("website", "Norton") ?>:<img src="<?php echo Yii::app() -> getBaseUrl(true) ?>/images/trust-badge/norton-seal.png" alt="Norton Security Seal">
                 </li>
             </ul>
             <div class="card-body">
@@ -57,19 +77,19 @@ $(document).ready(function(){
 </div>
 
 <?php $this -> widget('LinkPager', array(
-	'pages' => $dataProvider->getPagination(),
-	'htmlOptions' => array(
-		'class' => 'pagination flex-wrap',
-	),
-	'firstPageCssClass'=>'page-item',
+        'pages' => $dataProvider->getPagination(),
+        'htmlOptions' => array(
+                'class' => 'pagination flex-wrap',
+        ),
+        'firstPageCssClass'=>'page-item',
     'previousPageCssClass'=>'page-item',
     'internalPageCssClass'=>'page-item',
     'nextPageCssClass'=>'page-item',
     'lastPageCssClass'=>'page-item',
-	'cssFile' => false,
-	'header' => '',
-	'hiddenPageCssClass' => 'disabled',
-	'selectedPageCssClass' => 'active',
+        'cssFile' => false,
+        'header' => '',
+        'hiddenPageCssClass' => 'disabled',
+        'selectedPageCssClass' => 'active',
 )); ?>
 
 <div class="clearfix"></div>
