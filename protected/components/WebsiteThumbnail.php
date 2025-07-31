@@ -1,94 +1,156 @@
 <?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
-// Asumo que este archivo es un "component" o clase en tu framework (e.g., Yii)
-// que se llama de alguna manera para generar la miniatura.
-// Si esta clase extiende alguna otra, o tiene métodos adicionales, deberás fusionar
-// esta lógica con tu estructura existente.
-class WebsiteThumbnailComponent
-{
-    // Puedes mantener aquí otras propiedades si tu clase las necesita
-    // ...
+class WebsiteThumbnail {
+    // Rutas base para tus miniaturas locales
+    // Asegúrate de que este directorio exista y sea escribible por Apache (chmod 775, chown apache:apache)
+    private static $thumbnailBasePath = '/var/www/html/thumbs/';
+    private static $thumbnailWebPath = '/thumbs/'; // Ruta accesible desde el navegador
+    private static $dockerWrapperScript = '/var/www/screenshot-scripts/run_docker_screenshot.sh';
+
+
+    // Ruta al script de Node.js DENTRO DEL CONTENEDOR DOCKER.
+    // Esta ruta es cómo Docker verá tu script.
+    private static $nodeScriptPathInContainer = '/app/take_screenshot.js';
+
+    // Ruta al directorio donde está el script de Node.js en el HOST (tu servidor EC2).
+    // Usaremos esto para montar el volumen en Docker.
+    private static $nodeScriptHostDir = '/var/www/screenshot-scripts/';
 
     /**
-     * Método principal para generar y mostrar la miniatura.
-     * Deberás llamar a este método desde tu controlador o la parte de la aplicación
-     * que maneja la solicitud de generación de miniaturas.
-     *
-     * Ejemplo de cómo se llamaría (ajusta según tu framework):
-     * WebsiteThumbnailComponent::generateAndDisplayThumbnail();
+     * Función para generar el nombre del archivo de la miniatura.
+     * @param string $url La URL de la que se toma la miniatura.
+     * @param string $size El tamaño de la miniatura (t, s, m, l, x).
+     * @return string El nombre del archivo de la miniatura.
      */
-    public static function generateAndDisplayThumbnail()
-    {
-        // 1. Obtener la URL de entrada y otros parámetros de la solicitud
-        //    Ajusta 'url_a_capturar' si tu parámetro GET/POST tiene otro nombre.
-        $url = isset($_GET['url_a_capturar']) ? $_GET['url_a_capturar'] : '';
-        $width = isset($_GET['width']) ? (int)$_GET['width'] : 400;
-        $height = isset($_GET['height']) ? (int)$_GET['height'] : 300;
+    private static function getThumbnailFilename($url, $size) {
+        $hash = md5($url . $size); // Genera un hash único basado en la URL y el tamaño
+        return "thumb_{$hash}.png";
+    }
 
-        // Manejar caso de URL vacía
-        if (empty($url)) {
-            header('Content-Type: text/plain');
-            echo "Error: No se proporcionó una URL para capturar.";
-            exit();
+    /**
+     * Esta función es el corazón del nuevo sistema: genera la miniatura.
+     * @param string $url La URL a capturar.
+     * @param string $size El tamaño de la miniatura (t, s, m, l, x).
+     * @return string La URL web de la miniatura generada o de un placeholder si falla.
+     */
+    public static function generateThumbnail($url, $size = 'm') {
+        // Mapeo de tamaños (PagePeeker a dimensiones de captura)
+        $sizes = [
+            't' => ['width' => 90, 'height' => 68],
+            's' => ['width' => 120, 'height' => 90],
+            'm' => ['width' => 200, 'height' => 150], // Tamaño predeterminado
+            'l' => ['width' => 400, 'height' => 300],
+            'x' => ['width' => 480, 'height' => 360],
+        ];
+
+        $viewport = $sizes[$size] ?? $sizes['m']; // Usa el tamaño especificado o el predeterminado 'm'
+
+        $filename = self::getThumbnailFilename($url, $size);
+        $fullPath = self::$thumbnailBasePath . $filename;
+        $webUrl = self::$thumbnailWebPath . $filename;
+
+        // Verifica si la miniatura ya existe y es relativamente "fresca" (ej. última semana)
+        // Esto evita regenerar la misma miniatura una y otra vez para mejorar el rendimiento
+        if (file_exists($fullPath) && (time() - filemtime($fullPath) < (7 * 24 * 60 * 60))) { // 7 días de caché
+            return $webUrl;
         }
 
-        // 2. Normalizar la URL: Asegurarse de que tenga http:// o https://
-        if (!preg_match("~^(?:f|ht)tps?://~i", $url)) {
-            $url = "http://" . $url; // Añade http:// si no tiene prefijo
-        }
-
-        // 3. Definir las rutas de salida para la miniatura.
-        //    El nombre del archivo será el hash MD5 de la URL para que sea único.
-        $filename = "thumb_" . md5($url) . ".png";
-
-        //    a) $localOutputPath: La ruta en el sistema de archivos del servidor host (donde PHP la encontrará)
-        //       Es CRÍTICO que este sea el directorio donde Apache pueda leer y servir la imagen.
-        $localOutputPath = "/var/www/html/thumbs/" . $filename;
-
-        //    b) $dockerOutputPath: La ruta que Puppeteer usará *dentro* del contenedor Docker.
-        //       Debe coincidir con la parte interna del mapeo de volumen (-v HOST_PATH:CONTAINER_PATH).
-        //       Si mapeamos /var/www/html/thumbs (host) a /app/screenshots (contenedor),
-        //       entonces Puppeteer debe guardar en /app/screenshots/nombre_del_archivo.png.
-        $dockerOutputPath = "/app/screenshots/" . $filename;
-
-        // 4. Asegurarse de que el directorio de miniaturas exista y tenga permisos.
-        //    El directorio 'thumbs' debe ser escribible por el usuario del servidor web (apache).
-        $thumbsDir = dirname($localOutputPath);
+        // Asegurarse de que el directorio de miniaturas exista y tenga permisos.
+        // El directorio 'thumbs' debe ser escribible por el usuario del servidor web (apache).
+        $thumbsDir = dirname($fullPath);
         if (!file_exists($thumbsDir)) {
-            // Intenta crear el directorio de forma recursiva con permisos 0777.
-            // Para depuración, 0777 es permisivo. En producción, considera 0775 y chown.
-            if (!mkdir($thumbsDir, 0777, true)) {
-                header('Content-Type: text/plain');
-                echo "Error: No se pudo crear el directorio de miniaturas en " . htmlspecialchars($thumbsDir);
-                exit();
+            if (!mkdir($thumbsDir, 0777, true)) { // Crea el directorio de forma recursiva con permisos 0777
+                error_log("Error: No se pudo crear el directorio de miniaturas en " . htmlspecialchars($thumbsDir));
+                return self::$thumbnailWebPath . 'not-available.png';
             }
         }
 
-        // 5. Construir y ejecutar el comando de shell (que a su vez ejecuta el script Docker).
-        //    Asegúrate de que la ruta a run_docker_screenshot.sh sea correcta en tu servidor.
-        $command = "/var/www/screenshot-scripts/run_docker_screenshot.sh " .
-                   escapeshellarg($url) . " " .
-                   escapeshellarg($dockerOutputPath) . " " . // Pasamos la ruta interna de Docker
-                   escapeshellarg($width) . " " .
-                   escapeshellarg($height);
 
-        // Ejecuta el comando. La salida de depuración se redirigirá al error_log de Apache.
+        // Comando para ejecutar el script wrapper (que a su vez llama a Docker)
+        $command = "sudo " . escapeshellarg(self::$dockerWrapperScript) . " " .
+                   escapeshellarg($url) . " " . escapeshellarg($fullPath) . " " .
+                   escapeshellarg($viewport['width']) . " " . escapeshellarg($viewport['height']) . " 2>&1"; // Redirige errores a stdout
+
+        // Ejecuta el comando y captura su salida (para depuración)
         $output = shell_exec($command);
 
-        // 6. Mostrar la miniatura o un mensaje de error si no se generó.
-        if (file_exists($localOutputPath)) {
-            header('Content-Type: image/png');
-            readfile($localOutputPath);
-            exit(); // Importante salir después de enviar el archivo
+        // Puedes registrar la salida para ayudarte a depurar si algo falla
+        // Asegúrate de que tu sistema de log (Yii::log) esté configurado para escribir en un archivo accesible.
+        error_log("Screenshot command output for {$url}: " . $output); // Mejor usar error_log para depuración rápida
+
+        // Verifica si la captura de pantalla se creó exitosamente
+        if (file_exists($fullPath) && filesize($fullPath) > 0) {
+            // Establece permisos adecuados para la imagen generada por Docker (se guarda como root dentro del contenedor)
+            // Necesitas dar permiso a Apache para leerla.
+            chmod($fullPath, 0644); // Permite leer al dueño (root) y a otros (Apache)
+            return $webUrl;
         } else {
-            // La miniatura no se encontró. Esto indica un fallo en la generación.
-            header('Content-Type: text/plain');
-            echo "Error al generar la miniatura para: " . htmlspecialchars($url) . "\n\n";
-            echo "Detalles del log de depuración (verifica el error_log de Apache para más):\n";
-            echo "-------------------------------------------------------------------\n";
-            echo $output; // Esto mostrará lo que el shell_exec capturó.
-            exit();
+            error_log("Fallo al generar captura para {$url}. Output: " . $output);
+            // Retorna la URL de un placeholder si falla la generación
+            return self::$thumbnailWebPath . 'not-available.png'; // ¡Asegúrate de crear esta imagen en /var/www/html/thumbs/!
         }
     }
+
+    // --- Funciones de la aplicación que ahora usan nuestro generador local ---
+    // (Estas reemplazan las llamadas a la API de PagePeeker)
+
+    public static function getPollUrl(array $params = array()) {
+        // En este nuevo sistema, el "polling" es simplemente generar la miniatura.
+        if (isset($params['url']) && isset($params['size'])) {
+             return self::generateThumbnail($params['url'], $params['size']);
+        }
+        return self::$thumbnailWebPath . 'not-available.png';
+    }
+
+    public static function getResetUrl(array $params = array()) {
+        // Para "resetear" la miniatura, simplemente la borramos para que se genere una nueva.
+        if (isset($params['url']) && isset($params['size'])) {
+            $filename = self::getThumbnailFilename($params['url'], $params['size']);
+            $fullPath = self::$thumbnailBasePath . $filename;
+            if (file_exists($fullPath)) {
+                unlink($fullPath); // Elimina la miniatura antigua
+            }
+            return self::generateThumbnail($params['url'], $params['size']); // Genera una nueva
+        }
+        return self::$thumbnailWebPath . 'not-available.png';
+    }
+
+    public static function getThumbData(array $params = array(), $num = 0) {
+        if (!isset($params['url'])) {
+            throw new InvalidArgumentException("Url param is not specified");
+        }
+        $size = isset($params['size']) ? $params['size'] : "m";
+        $thumbUrl = self::generateThumbnail($params['url'], $size); // Llama a nuestra función de generación local
+
+        return json_encode(array(
+            'thumb' => $thumbUrl,
+            'size' => $size,
+            'url' => $params['url']
+        ));
+    }
+
+    // Funciones que pueden existir para Open Graph u otros usos
+    public static function getOgImage(array $params = array()) {
+        if (isset($params['url'])) {
+            return self::generateThumbnail($params['url'], 'x'); // Genera tamaño extra-grande
+        }
+        return self::$thumbnailWebPath . 'not-available.png';
+    }
+
+    public static function prepareUrl($url, array $strtr = array(), array $params = array()) {
+        // Esta función ya no es estrictamente necesaria con nuestra nueva lógica
+        return $url;
+    }
+
+    public static function thumbnailStack($websites, array $params=array()) {
+        $stack = array();
+        foreach ($websites as $website) {
+            $params['url'] = $website['domain'];
+            $stack[$website['id']] = self::getThumbData($params);
+        }
+        return $stack; // Devolver la pila después de procesar
+    }
 }
-?>

@@ -2,10 +2,10 @@
     'app.name'=>'Website Worth Calculator',
     'app.timezone'=>'Europe/Berlin',
     'app.default_language'=>'en',
-    'app.host'=>'http://sitecost.codecanyon',
+'app.host'=>'http://valordeweb.online',    
     'app.base_url'=>'/',
-    'app.encryption_key'=>'R7KRcQWfQsM2We88492ZLold7kNqJ5VO',
-    'app.validation_key'=>'BRmCmfvaemWoz5rzx767lTkURS2LS0Ku',
+'app.encryption_key'=>'44281062276272877480539848284255',
+'app.validation_key'=>'57162937734202941480164575841045',
     'app.command_key'=>'',
     'app.log_missing_translations'=>true,
     'app.cookie_validation'=>true,
@@ -13,11 +13,11 @@
     'app.nav_icon'=>'',
     'app.allow_user_auth'=>true,
 
-    'db.host'=>'localhost',
-    'db.dbname'=>'sitecost',
-    'db.username'=>'homestead',
-    'db.password'=>'secret',
-    'db.port'=>3306,
+'db.host'=>'valordeweb-db.c5gymeoec8nq.us-east-2.rds.amazonaws.com',
+'db.dbname'=>'sitecost',
+'db.username'=>'admin',
+'db.password'=>'Che-gab=1510', // <--- Contraseña maestra de tu RDS
+'db.port'=>3306,
 
     'mailer.host'=>'localhost',
     'mailer.port'=>25,
@@ -53,7 +53,8 @@
     'share.js'=>'',
     'share.html'=>'',
 
-    'thumbnail.proxy'=>false,
+'thumbnail.proxy'=>true, // <-- CAMBIAR A TRUE
+
     'pagepeeker.verify'=>"",
     'pagepeeker.api_key'=>'',
 
