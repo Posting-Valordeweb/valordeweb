@@ -5,8 +5,9 @@ $(document).ready(function(){
         <?php echo $id ?>:<?php echo $thumbnail ?>,
         <?php endforeach; ?>
     };
-    // Asumiendo que dynamicThumbnail() ya maneja la lógica de carga asíncrona.
-    // Si necesitas que cargue específicamente desde /thumbs/, tendríamos que revisar dynamicThumbnail.js
+    // Asumiendo que dynamicThumbnail() ya maneja la lógica de carga asíncrona
+    // y que es compatible con las URLs de miniaturas generadas.
+    // Si no se carga dinámicamente, esta parte no tendrá efecto directo en el src inicial.
     dynamicThumbnail(urls);
 });
 </script>
@@ -16,23 +17,29 @@ $(document).ready(function(){
     foreach ($data as $website):
         $url = Yii::app()->controller->createUrl("website/show", array("domain"=>$website->domain));
 
-        // --- INICIO DE LA MODIFICACIÓN ---
-        // Construye el nombre de archivo de la miniatura esperado
-        // Asegúrate de que Helper::cropDomain() elimine http://, https://, www.
+        // --- INICIO DE LA MODIFICACIÓN DE LA LÓGICA DE LA MINIATURA ---
+        // 1. Limpiar el dominio para que coincida con el nombre de archivo generado por Puppeteer.
+        //    Asumimos que Helper::cropDomain() ya hace esto (elimina http://, https://, www.).
+        //    Si el nombre de archivo en /var/www/html/thumbs/ es diferente (ej. con www. o http://),
+        //    necesitaríamos ajustar esta línea para que coincida EXACTAMENTE.
         $thumbnailFileName = Helper::cropDomain($website->domain) . '.png';
-        $thumbnailPath = '/thumbs/' . $thumbnailFileName; // Ruta relativa al base URL
 
-        // Ruta completa en el servidor
+        // 2. Construir la ruta relativa de la miniatura que Apache debe servir.
+        $thumbnailPath = '/thumbs/' . $thumbnailFileName;
+
+        // 3. Construir la ruta completa en el sistema de archivos del servidor
+        //    para verificar si el archivo existe.
         $serverPathToFile = $_SERVER['DOCUMENT_ROOT'] . $thumbnailPath;
 
-        // Determina la URL de la imagen a mostrar
-        $imageUrl = Yii::app()->baseUrl . '/images/not-available.png'; // Por defecto, la imagen "no disponible"
+        // 4. Determinar la URL final de la imagen. Por defecto, será la imagen "no disponible".
+        $imageUrl = Yii::app()->baseUrl . '/images/not-available.png';
 
+        // 5. Verificar si el archivo de miniatura REALMENTE existe en el servidor.
         if (file_exists($serverPathToFile)) {
-            // Si la miniatura existe en el servidor, usa su URL
+            // Si existe, usamos la URL de la miniatura generada.
             $imageUrl = Yii::app()->baseUrl . $thumbnailPath;
         }
-        // --- FIN DE LA MODIFICACIÓN ---
+        // --- FIN DE LA MODIFICACIÓN DE LA LÓGICA DE LA MINIATURA ---
 ?>
     <div class="col col-12 col-md-6 col-lg-4 mb-4">
         <div class="card mb-3">
